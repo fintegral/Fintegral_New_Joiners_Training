@@ -3,6 +3,10 @@ from functools import cached_property
 import QuantLib as ql
 from instruments.instrument import BaseInstrument
 from instruments.instrument_helpers import dt_2_qldt
+from instruments.monte_carlo import MonteCarloSettings
+
+# TODO 1) Add a repr for options
+# TODO 2) Test and equality dunder method
 
 
 class Option(BaseInstrument, ABC):
@@ -92,13 +96,19 @@ class Option(BaseInstrument, ABC):
 
 
 class VanillaOption(Option, ABC):
+    DEFAULT_MC_NUM_PATHS = 1000
+    DEFAULT_MC_TIME_STEPS = 1
 
-    def __init__(self, asset_name, strike, maturity, pricing_engine):
+    def __init__(self, asset_name, strike, maturity, pricing_engine, **kwargs):
         super().__init__(
             asset_name=asset_name,
             strike=strike,
             maturity=maturity,
             pricing_engine=pricing_engine
+        )
+        self._mc_settings = MonteCarloSettings(
+            num_paths=self.DEFAULT_MC_NUM_PATHS,
+            time_steps=self.DEFAULT_MC_TIME_STEPS
         )
 
     @cached_property
@@ -134,16 +144,42 @@ class VanillaOption(Option, ABC):
         )
         return bsm_process
 
+    @abstractmethod
+    def option_model(self, process):
+        raise NotImplementedError()
+
     def _price(self, spot, vol, rfr, div):
         bsm_process = self.bsm_process(spot=spot, vol=vol, rfr=rfr, div=div)
         engine = self.option_model(process=bsm_process)
         self.option_obj.setPricingEngine(engine)
         return self.option_obj.NPV()
 
+    @property
+    def mc_num_paths(self):
+        return self._mc_settings.num_paths
+
+    @mc_num_paths.setter
+    def mc_num_paths(self, num_paths):
+        self._mc_settings.num_paths = num_paths
+
+    @property
+    def mc_time_steps(self):
+        return self._mc_settings.time_steps
+
+    @mc_time_steps.setter
+    def mc_time_steps(self, time_steps):
+        self._mc_settings.time_steps = time_steps
+
+    @property
+    def mc_rng(self):
+        return self._mc_settings.rng
+
 
 class EuropeanOption(VanillaOption, ABC):
     ANALYTICAL = "ANALYTICAL"
     MONTE_CARLO = "MONTE_CARLO"
+    DEFAULT_MC_NUM_PATHS = 1000
+    DEFAULT_MC_TIME_STEPS = 1
 
     def __init__(
             self, asset_name, strike, maturity, pricing_engine=None
@@ -153,7 +189,7 @@ class EuropeanOption(VanillaOption, ABC):
             asset_name=asset_name,
             strike=strike,
             maturity=maturity,
-            pricing_engine=pricing_engine
+            pricing_engine=pricing_engine,
         )
 
     @cached_property
@@ -168,27 +204,33 @@ class EuropeanOption(VanillaOption, ABC):
         if self.pricing_engine == self.ANALYTICAL:
             return ql.AnalyticEuropeanEngine(process)
         elif self.pricing_engine == self.MONTE_CARLO:
-            # TODO -> need to include the monte carlo simulation options
-            steps = self.mc_params["steps"]
-            rng = self.mc_params["rng"]
-            num_paths = self.mc_params["num_paths"]
             return ql.MCEuropeanEngine(
-                process, rng, steps, requiredSamples=num_paths
+                process,
+                self.mc_rng,
+                self.mc_time_steps,
+                requiredSamples=self.mc_num_paths
             )
 
 
 class AmericanOption(VanillaOption, ABC):
     MONTE_CARLO = "MONTE_CARLO"
+    DEFAULT_MC_NUM_PATHS = 1000
+    DEFAULT_MC_TIME_STEPS = 100
 
     def __init__(
-            self, asset_name, strike, maturity, pricing_engine, earliest_date,
+            self,
+            asset_name,
+            strike,
+            maturity,
+            earliest_date,
+            pricing_engine=None,
     ):
         pricing_engine = pricing_engine or self.MONTE_CARLO
         super().__init__(
             asset_name=asset_name,
             strike=strike,
             maturity=maturity,
-            pricing_engine=pricing_engine
+            pricing_engine=pricing_engine,
         )
         self.earliest_date = earliest_date
 
@@ -203,14 +245,12 @@ class AmericanOption(VanillaOption, ABC):
         )
 
     def option_model(self, process):
-
         if self.pricing_engine == self.MONTE_CARLO:
-            # TODO -> need to include the monte carlo simulation options
-            steps = self.mc_params["steps"]
-            rng = self.mc_params["rng"]
-            num_paths = self.mc_params["num_paths"]
             return ql.MCAmericanEngine(
-                process, rng, steps, requiredSamples=num_paths
+                process,
+                self.mc_rng,
+                self.mc_time_steps,
+                requiredSamples=self.mc_num_paths
             )
         else:
             raise NotImplementedError("The pricing engine")
@@ -248,11 +288,13 @@ def main():
     asset_name = "Asset"
     strike = 120
     maturity = datetime.date(2025, 11, 21)
+    earliest = datetime.date(2024, 11, 21)
 
     euro_call_1 = EuropeanCallOption(
         asset_name=asset_name,
         strike=strike,
         maturity=maturity,
+        pricing_engine=EuropeanCallOption.MONTE_CARLO
     )
 
     eq_asset_md = asset_data.EquityAssetMarketData(
@@ -264,8 +306,18 @@ def main():
     mdo = MarketDataObject()
     mdo.add_asset_data(asset_data=[eq_asset_md, ir_asset_md])
 
-    npv = euro_call_1.price(market_data_object=mdo)
-    print(f'Price is: {npv}')
+    e_npv = euro_call_1.price(market_data_object=mdo)
+    print(f'European option price is: {e_npv}')
+
+    american_call_1 = AmericanCallOption(
+        asset_name=asset_name,
+        strike=strike,
+        maturity=maturity,
+        earliest_date=earliest
+    )
+    a_npv = american_call_1.price(market_data_object=mdo)
+    print(f'American option price is: {a_npv}')
+    temp = 1
 
 
 if __name__ == "__main__":

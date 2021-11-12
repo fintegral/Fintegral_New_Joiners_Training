@@ -99,7 +99,7 @@ class VanillaOption(Option, ABC):
     DEFAULT_MC_NUM_PATHS = 1000
     DEFAULT_MC_TIME_STEPS = 1
 
-    def __init__(self, asset_name, strike, maturity, pricing_engine, **kwargs):
+    def __init__(self, asset_name, strike, maturity, pricing_engine):
         super().__init__(
             asset_name=asset_name,
             strike=strike,

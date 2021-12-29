@@ -4,7 +4,9 @@ import datetime
 from statistics import pla_stats
 from core.portfolio import Portfolio
 from core.deal import Deal
-from instruments.equity import options, stocks
+from instruments.equity import stocks
+from instruments.equity.options import options
+from instruments.equity.options import pricing_engine
 from matplotlib import pyplot
 from market_data import asset_data, scenario_generator
 from market_data.market_data_object import MarketDataObject
@@ -85,14 +87,14 @@ def hedging_example():
         asset_name=asset_name,
         strike=strike,
         maturity=maturity,
-        pricing_engine=options.EuropeanCallOption.ANALYTICAL
+        pricing_engine=pricing_engine.EuropeanAnalyticalEngine()
     )
 
     option_mc = options.EuropeanCallOption(
         asset_name=asset_name,
         strike=strike,
         maturity=maturity,
-        pricing_engine=options.EuropeanCallOption.MONTE_CARLO
+        pricing_engine=pricing_engine.EuropeanMCEngine()
     )
 
     stock = stocks.Stock(asset_name=asset_name, num_shares=1)

@@ -47,16 +47,18 @@ def hedging_example():
     """
     asset_name = 'TestAsset'
     base_spot = 100
-    vol = 0.2
-    strike = 100
-    rfr = 0.05
+    implied_vol = 0.1
+    strike = 110
+    rfr = 0.02
+    num_options = 100
 
-    n_ratios = 20
-    maturity = datetime.date(2025, 1, 1)
-    ratios = np.linspace(0, 1, n_ratios)
-    shocks = scenario_generator.generate_log_normal_shocks(
-        vol=vol, num_shocks=100
-    )
+    historical_vol = implied_vol
+
+    num_stock_points = 51
+    stock_num_diff = 2
+    maturity = datetime.date(2028, 1, 1)
+    num_stocks = [i * stock_num_diff for i in range(num_stock_points)]
+    shocks = scenario_generator.generate_log_normal_shocks(vol=historical_vol, num_shocks=250)
     rand_spot = base_spot * shocks
 
     rfr_asset = asset_data.InterestRateAssetMarketData(
@@ -64,7 +66,7 @@ def hedging_example():
     )
 
     base_eq_asset = asset_data.EquityAssetMarketData(
-        asset_name=asset_name, spot=base_spot, volatility=vol
+        asset_name=asset_name, spot=base_spot, volatility=implied_vol
     )
 
     base_mdo = MarketDataObject()
@@ -72,7 +74,7 @@ def hedging_example():
 
     shocked_eq_assets = [
         asset_data.EquityAssetMarketData(
-            asset_name=asset_name, spot=shocked_spot, volatility=vol
+            asset_name=asset_name, spot=shocked_spot, volatility=implied_vol
         ) for shocked_spot in rand_spot
     ]
 
@@ -83,14 +85,14 @@ def hedging_example():
         mdo.add_asset_data([rfr_asset, shocked_eq_asset])
         shocked_mdos.append(mdo)
 
-    option_analytical = options.EuropeanCallOption(
+    option_analytical = options.EuropeanPutOption(
         asset_name=asset_name,
         strike=strike,
         maturity=maturity,
         pricing_engine=pricing_engine.EuropeanAnalyticalEngine()
     )
 
-    option_mc = options.EuropeanCallOption(
+    option_mc = options.EuropeanPutOption(
         asset_name=asset_name,
         strike=strike,
         maturity=maturity,
@@ -99,10 +101,10 @@ def hedging_example():
 
     stock = stocks.Stock(asset_name=asset_name, num_shares=1)
 
-    opt_deal_a = Deal(instrument=option_analytical, quantity=1)
-    opt_deal_mc = Deal(instrument=option_mc, quantity=1)
+    opt_deal_a = Deal(instrument=option_analytical, quantity=num_options)
+    opt_deal_mc = Deal(instrument=option_mc, quantity=num_options)
 
-    stock_deals = [Deal(instrument=stock, quantity=-x) for x in ratios]
+    stock_deals = [Deal(instrument=stock, quantity=x) for x in num_stocks]
 
     portfolio_as = []
     portfolio_mcs = []
@@ -122,12 +124,16 @@ def hedging_example():
     base_npvs_a = [x.price(base_mdo) for x in portfolio_as]
     base_npvs_mc = [x.price(base_mdo) for x in portfolio_mcs]
 
+    original_analytical_delta = option_analytical.delta()
+    logger.info(f'Original delta of analytical option is {original_analytical_delta}.')
+    portfolio_delta = [original_analytical_delta*num_options + i for i in num_stocks]
 
     sp_values = []
     kstest_values = []
+    pnls = {}
 
-    for portfolio_a, portfolio_mc, base_npv_a, base_npv_mc in zip(
-            portfolio_as, portfolio_mcs, base_npvs_a, base_npvs_mc
+    for portfolio_a, portfolio_mc, base_npv_a, base_npv_mc, num_stock in zip(
+            portfolio_as, portfolio_mcs, base_npvs_a, base_npvs_mc, num_stocks
     ):
         analytical_npvs = []
         mc_npvs = []
@@ -144,21 +150,47 @@ def hedging_example():
 
         sp_values.append(pla_stats.pla_stats(fo_portfolio_pnls, risk_portfolio_pnls).spearman_value)
         kstest_values.append(pla_stats.pla_stats(fo_portfolio_pnls, risk_portfolio_pnls).ks_value)
+        pnls[num_stock] = (fo_portfolio_pnls, risk_portfolio_pnls)
 
-    fig = pyplot.figure()
-    ax1 = fig.add_subplot(121)
-    ax2 = fig.add_subplot(122)
-    ax1.scatter(ratios, kstest_values)
-    ax2.scatter(ratios, sp_values)
+    logger.info(f'Original delta of analytical option is {original_analytical_delta}.')
 
-    ax1.set_title('FO Pnl vs Risk PnL')
-    ax1.set_xlabel('Hedge Ratio')
-    ax1.set_ylabel('KS Test')
+    fig_ks = pyplot.figure(1)
+    ax_ks = fig_ks.add_subplot(111)
+    ax_ks.scatter(portfolio_delta, kstest_values)
+    ax_ks.set_xlabel('Total Portfolio Delta')
+    ax_ks.set_ylabel('KS Test Statistic')
 
-    ax2.set_title('FO Pnl vs Risk PnL')
-    ax2.set_xlabel('Hedge Ratio')
-    ax2.set_ylabel('Spearman Correlation')
+    fig_sc = pyplot.figure(2)
+    ax_sc = fig_sc.add_subplot(111)
+    ax_sc.scatter(portfolio_delta, sp_values)
+    ax_sc.set_xlabel('Total Portfolio Delta')
+    ax_sc.set_ylabel('Spearman Correlation')
+
+    index_a = 0
+    num_stock_a = list(pnls.keys())[index_a]
+    pnls_a = pnls[list(pnls.keys())[index_a]]
+
+    fig_a = pyplot.figure(3)
+    ax_a = fig_a.add_subplot(111)
+    ax_a.scatter(pnls_a[0], pnls_a[1], s=5)
+    ax_a.set_title(f'Long {num_options} Put Options and {num_stock_a} Underlying Stock')
+    ax_a.set_xlabel('HPL')
+    ax_a.set_ylabel('RTPL')
+
+    index_b = 21
+    num_stock_b = list(pnls.keys())[index_b]
+    pnls_b = pnls[list(pnls.keys())[index_b]]
+
+    fig_b = pyplot.figure(4)
+    ax_b = fig_b.add_subplot(111)
+    ax_b.scatter(pnls_b[0], pnls_b[1], s=5)
+    ax_b.set_title(f'Long {num_options} Put Options and {num_stock_b} Underlying Stock')
+    ax_b.set_xlabel('HPL')
+    ax_b.set_ylabel('RTPL')
     pyplot.show()
+
+    logger.info(f'Original delta of analytical option is {original_analytical_delta}.')
+    temp = 1
 
 
 if __name__ == '__main__':

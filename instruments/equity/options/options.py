@@ -173,6 +173,9 @@ class EuropeanOption(Option):
     def default_pricing_engine(self):
         return EuropeanAnalyticalEngine
 
+    def delta(self):
+        return self.option_obj.delta()
+
 
 class AmericanOption(Option):
 

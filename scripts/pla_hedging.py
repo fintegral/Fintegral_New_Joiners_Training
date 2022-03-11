@@ -127,6 +127,7 @@ def hedging_example():
     original_analytical_delta = option_analytical.delta()
     logger.info(f'Original delta of analytical option is {original_analytical_delta}.')
     portfolio_delta = [original_analytical_delta*num_options + i for i in num_stocks]
+    hedging_ratio = [(-i/(original_analytical_delta*num_options))*100 for i in num_stocks]
 
     sp_values = []
     kstest_values = []
@@ -156,14 +157,14 @@ def hedging_example():
 
     fig_ks = pyplot.figure(1)
     ax_ks = fig_ks.add_subplot(111)
-    ax_ks.scatter(portfolio_delta, kstest_values)
-    ax_ks.set_xlabel('Total Portfolio Delta')
+    ax_ks.scatter(hedging_ratio, kstest_values)
+    ax_ks.set_xlabel('Hedge Ratio (%)')
     ax_ks.set_ylabel('KS Test Statistic')
 
     fig_sc = pyplot.figure(2)
     ax_sc = fig_sc.add_subplot(111)
-    ax_sc.scatter(portfolio_delta, sp_values)
-    ax_sc.set_xlabel('Total Portfolio Delta')
+    ax_sc.scatter(hedging_ratio, sp_values)
+    ax_sc.set_xlabel('Hedge Ratio (%)')
     ax_sc.set_ylabel('Spearman Correlation')
 
     index_a = 0
